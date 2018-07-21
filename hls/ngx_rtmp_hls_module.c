@@ -30,7 +30,7 @@ static ngx_int_t ngx_rtmp_hls_ensure_directory(ngx_rtmp_session_t *s,
        ngx_str_t *path);
 
 
-#define NGX_RTMP_HLS_BUFSIZE            (1024*1024)
+#define NGX_RTMP_HLS_BUFSIZE            (32*1024*1024)
 #define NGX_RTMP_HLS_DIR_ACCESS         0744
 
 
@@ -57,6 +57,7 @@ typedef struct {
 
     ngx_str_t                           playlist;
     ngx_str_t                           playlist_bak;
+    ngx_str_t                           playlist_chunk_number;
     ngx_str_t                           var_playlist;
     ngx_str_t                           var_playlist_bak;
     ngx_str_t                           stream;
@@ -81,6 +82,7 @@ typedef struct {
     uint64_t                            aframe_pts;
 
     ngx_rtmp_hls_variant_t             *var;
+    u_char                              endlisted;
 } ngx_rtmp_hls_ctx_t;
 
 
@@ -671,10 +673,17 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s)
         return ngx_rtmp_hls_write_variant_playlist(s);
     }
 
+
+    f = ngx_rtmp_hls_get_frag(s, ctx->nfrags - 1);
+    
     ngx_memzero(&v, sizeof(v));
     ngx_str_set(&(v.module), "hls");
-    v.playlist.data = ctx->playlist.data;
-    v.playlist.len = ctx->playlist.len;
+
+    ngx_sprintf(ctx->playlist_chunk_number.data, "%uL", f->id);
+    
+    v.playlist.data = ctx->playlist_chunk_number.data;
+    v.playlist.len = (f->id == 0) ? 1 : (int)log10(f->id) + 1;
+
     return next_playlist(s, &v);
 
 write_err:
@@ -1474,6 +1483,12 @@ ngx_rtmp_hls_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
         len += sizeof("/index") - 1;
     }
 
+    #define CHUNK_MAX_LENGTH 9
+    ctx->playlist_chunk_number.data = ngx_palloc(s->connection->pool, CHUNK_MAX_LENGTH);
+    ctx->playlist_chunk_number.len = CHUNK_MAX_LENGTH;
+    ngx_memzero(ctx->playlist_chunk_number.data, CHUNK_MAX_LENGTH);
+
+
     ctx->playlist.data = ngx_palloc(s->connection->pool, len);
     p = ngx_cpymem(ctx->playlist.data, hacf->path.data, hacf->path.len);
 
@@ -1601,6 +1616,48 @@ next:
     return next_publish(s, v);
 }
 
+static ngx_int_t
+ngx_rtmp_hls_update_endlist(ngx_rtmp_session_t *s)
+{
+    int                             fd;
+    ssize_t                         rc;
+    ngx_rtmp_hls_ctx_t             *ctx;
+
+    ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_hls_module);
+
+    if (ctx->endlisted == 1)
+        return NGX_OK;
+
+    fd = ngx_open_file(
+        ctx->playlist.data, NGX_FILE_WRONLY,
+        NGX_FILE_APPEND, NGX_FILE_DEFAULT_ACCESS);
+
+    if (fd == NGX_INVALID_FILE) {
+        ngx_log_error(NGX_LOG_ERR, s->connection->log, ngx_errno,
+                      "hls: " ngx_open_file_n " failed: '%V'",
+                      &ctx->playlist);
+
+        return NGX_ERROR;
+    }
+
+#define NGX_RTMP_HLS_ENDLIST_HEADER "#EXT-X-ENDLIST\n"
+
+    rc = ngx_write_fd(fd, NGX_RTMP_HLS_ENDLIST_HEADER,
+                      sizeof(NGX_RTMP_HLS_ENDLIST_HEADER) - 1);
+    if (rc < 0) {
+        ngx_log_error(NGX_LOG_ERR, s->connection->log, ngx_errno,
+                      "hls: " ngx_write_fd_n " failed: '%V'",
+                      &ctx->playlist);
+        ngx_close_file(fd);
+        return NGX_ERROR;
+    }
+
+    ctx->endlisted = 1;
+
+    ngx_close_file(fd);
+
+    return NGX_OK;
+}
 
 static ngx_int_t
 ngx_rtmp_hls_close_stream(ngx_rtmp_session_t *s, ngx_rtmp_close_stream_t *v)
@@ -1620,6 +1677,7 @@ ngx_rtmp_hls_close_stream(ngx_rtmp_session_t *s, ngx_rtmp_close_stream_t *v)
                    "hls: close stream");
 
     ngx_rtmp_hls_close_fragment(s);
+    ngx_rtmp_hls_update_endlist(s);
 
 next:
     return next_close_stream(s, v);
