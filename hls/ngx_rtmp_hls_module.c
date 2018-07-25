@@ -30,9 +30,9 @@ static ngx_int_t ngx_rtmp_hls_ensure_directory(ngx_rtmp_session_t *s,
        ngx_str_t *path);
 
 
-#define NGX_RTMP_HLS_BUFSIZE            (32*1024*1024)
-#define NGX_RTMP_HLS_DIR_ACCESS         0744
-
+#define NGX_RTMP_HLS_BUFSIZE                      (32*1024*1024)
+#define NGX_RTMP_HLS_DIR_ACCESS                   0744
+#define NGX_RTMP_HLS_PLAYLIST_REPORT_MAX_LENGTH   127
 
 typedef struct {
     uint64_t                            id;
@@ -679,7 +679,7 @@ ngx_rtmp_hls_write_playlist(ngx_rtmp_session_t *s)
     ngx_memzero(&v, sizeof(v));
     ngx_str_set(&(v.module), "hls");
 
-    ngx_memzero(ctx->playlist_chunk_number.data, CHUNK_MAX_LENGTH);
+    ngx_memzero(ctx->playlist_chunk_number.data, NGX_RTMP_HLS_PLAYLIST_REPORT_MAX_LENGTH);
     ngx_sprintf(ctx->playlist_chunk_number.data, "%uL %d %.3f", f->id, f->discont, f->duration);
     
     v.playlist.data = ctx->playlist_chunk_number.data;
@@ -1484,10 +1484,9 @@ ngx_rtmp_hls_publish(ngx_rtmp_session_t *s, ngx_rtmp_publish_t *v)
         len += sizeof("/index") - 1;
     }
 
-    #define CHUNK_MAX_LENGTH 127
-    ctx->playlist_chunk_number.data = ngx_palloc(s->connection->pool, CHUNK_MAX_LENGTH);
-    ctx->playlist_chunk_number.len = CHUNK_MAX_LENGTH;
-    ngx_memzero(ctx->playlist_chunk_number.data, CHUNK_MAX_LENGTH);
+    ctx->playlist_chunk_number.data = ngx_palloc(s->connection->pool, NGX_RTMP_HLS_PLAYLIST_REPORT_MAX_LENGTH);
+    ctx->playlist_chunk_number.len = NGX_RTMP_HLS_PLAYLIST_REPORT_MAX_LENGTH;
+    ngx_memzero(ctx->playlist_chunk_number.data, NGX_RTMP_HLS_PLAYLIST_REPORT_MAX_LENGTH);
 
     ctx->playlist.data = ngx_palloc(s->connection->pool, len);
     p = ngx_cpymem(ctx->playlist.data, hacf->path.data, hacf->path.len);
