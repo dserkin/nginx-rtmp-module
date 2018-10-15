@@ -30,7 +30,7 @@ static ngx_int_t ngx_rtmp_hls_ensure_directory(ngx_rtmp_session_t *s,
        ngx_str_t *path);
 
 
-#define NGX_RTMP_HLS_BUFSIZE            (1024*1024)
+#define NGX_RTMP_HLS_BUFSIZE            (32*1024*1024)
 #define NGX_RTMP_HLS_DIR_ACCESS         0744
 
 
@@ -81,6 +81,7 @@ typedef struct {
     uint64_t                            aframe_pts;
 
     ngx_rtmp_hls_variant_t             *var;
+    u_char                              endlisted;
 } ngx_rtmp_hls_ctx_t;
 
 
@@ -1620,7 +1621,32 @@ ngx_rtmp_hls_close_stream(ngx_rtmp_session_t *s, ngx_rtmp_close_stream_t *v)
                    "hls: close stream");
 
     ngx_rtmp_hls_close_fragment(s);
+    ngx_rtmp_hls_update_endlist(s);
 
+next:
+    return next_close_stream(s, v);
+}
+
+
+static ngx_int_t
+ngx_rtmp_hls_close_stream(ngx_rtmp_session_t *s, ngx_rtmp_close_stream_t *v)
+{
+    ngx_rtmp_hls_app_conf_t        *hacf;
+    ngx_rtmp_hls_ctx_t             *ctx;
+
+    hacf = ngx_rtmp_get_module_app_conf(s, ngx_rtmp_hls_module);
+
+    ctx = ngx_rtmp_get_module_ctx(s, ngx_rtmp_hls_module);
+
+    if (hacf == NULL || !hacf->hls || ctx == NULL) {
+        goto next;
+    }
+
+    ngx_log_debug0(NGX_LOG_DEBUG_RTMP, s->connection->log, 0,
+                   "hls: close stream");
+
+    ngx_rtmp_hls_close_fragment(s);
+    ngx_rtmp_hls_update_endlist(s);
 next:
     return next_close_stream(s, v);
 }
